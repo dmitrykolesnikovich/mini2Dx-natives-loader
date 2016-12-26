@@ -25,7 +25,7 @@ if(project.hasProperty('ossrhUser') && project.hasProperty("release")) {
 }
 
 group = 'org.mini2Dx'
-version = '1.0.0-SNAPSHOT'
+version = '1.0.0'
 description = 'Cross-platform OS detection and native library loading for Java'
 
 repositories {
