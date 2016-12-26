@@ -22,7 +22,7 @@ __Gradle__
 compile 'org.mini2Dx:natives-loader:1.0.0'
 ```
 
-The main two classes provided are [SharedLibraryLoader)](https://mini2dx.github.io/natives-loader/1.0.0/org/mini2Dx/natives/SharedLibraryLoader.html) and [OsInformation](https://mini2dx.github.io/natives-loader/1.0.0/org/mini2Dx/natives/OsInformation.html)
+The main two classes provided are [SharedLibraryLoader](https://mini2dx.github.io/natives-loader/1.0.0/org/mini2Dx/natives/SharedLibraryLoader.html) and [OsInformation](https://mini2dx.github.io/natives-loader/1.0.0/org/mini2Dx/natives/OsInformation.html)
 
 ## Contributing
 
