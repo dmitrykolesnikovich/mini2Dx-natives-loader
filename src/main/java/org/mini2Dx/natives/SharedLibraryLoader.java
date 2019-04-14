@@ -22,8 +22,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Method;
-import java.util.HashSet;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -35,7 +36,7 @@ import java.util.zip.ZipFile;
  * <em>Based on LibGDX's SharedLibraryLoader implementation</em>
  */
 public class SharedLibraryLoader {
-	private static final HashSet<String> LOADED_LIBRARIES = new HashSet<String>();
+	private static final Map<String, File> LOADED_LIBRARIES = new ConcurrentHashMap<String, File>();
 
 	private String nativesJar;
 
@@ -108,34 +109,55 @@ public class SharedLibraryLoader {
 
 	/**
 	 * Loads a shared library for the platform the application is running on.
+	 * Autodetects the appropriate libary filename to load.
 	 * 
 	 * @param libraryName
 	 *            The platform independent library name. See
 	 *            {@link #mapLibraryName(String)}
+	 * @return The {@link File} where the library was extracted to and loaded
+	 *         from or null if it was loaded via a different method (e.g. on iOS
+	 *         and Android it is tied to the app)
 	 */
-	public void load(String libraryName) {
+	public File load(String libraryName) {
+		return load(libraryName, mapLibraryName(libraryName));
+	}
+
+	/**
+	 * Loads a shared library for the platform the application is running on.
+	 * 
+	 * @param libraryName
+	 *            The platform independent library name. See
+	 *            {@link #mapLibraryName(String)}
+	 * @param libraryFilename
+	 *            The filename for the library for this OS
+	 * @return The {@link File} where the library was extracted to and loaded
+	 *         from or null if it was loaded via a different method (e.g. on iOS
+	 *         and Android it is tied to the app)
+	 */
+	public File load(String libraryName, String libraryFilename) {
 		// in case of iOS, things have been linked statically to the executable,
 		// bail out.
 		if (OsInformation.isIOS())
-			return;
+			return null;
 
 		synchronized (SharedLibraryLoader.class) {
 			if (isLoaded(libraryName))
-				return;
-			String platformName = mapLibraryName(libraryName);
+				return LOADED_LIBRARIES.get(libraryName);
 			try {
-				if (OsInformation.isAndroid())
-					System.loadLibrary(platformName);
-				else
-					loadFile(platformName);
-				setLoaded(libraryName);
+				if (OsInformation.isAndroid()) {
+					System.loadLibrary(libraryFilename);
+					setLoaded(libraryName, null);
+				} else {
+					setLoaded(libraryName, loadFile(libraryFilename));
+				}
 			} catch (Throwable ex) {
 				throw new RuntimeException(
-						"Couldn't load shared library '" + platformName + "' for target: "
+						"Couldn't load shared library '" + libraryFilename + "' for target: "
 								+ System.getProperty("os.name") + (OsInformation.is64Bit() ? ", 64-bit" : ", 32-bit"),
 						ex);
 			}
 		}
+		return LOADED_LIBRARIES.get(libraryName);
 	}
 
 	private InputStream readFile(String path) {
@@ -144,7 +166,8 @@ public class SharedLibraryLoader {
 			if (input != null) {
 				return input;
 			}
-			input = SharedLibraryLoader.class.getResourceAsStream(OsInformation.getOs().getFallbackLibraryLocation() + path);
+			input = SharedLibraryLoader.class
+					.getResourceAsStream(OsInformation.getOs().getFallbackLibraryLocation() + path);
 			if (input != null) {
 				return input;
 			}
@@ -220,9 +243,8 @@ public class SharedLibraryLoader {
 	 */
 	private File getExtractedFile(String dirName, String fileName) {
 		// Temp directory with username in path.
-		File idealFile = new File(
-				System.getProperty("java.io.tmpdir") + "/natives-loader" + System.getProperty("user.name") + "/" + dirName,
-				fileName);
+		File idealFile = new File(System.getProperty("java.io.tmpdir") + "/natives-loader"
+				+ System.getProperty("user.name") + "/" + dirName, fileName);
 		if (canWrite(idealFile))
 			return idealFile;
 
@@ -338,42 +360,41 @@ public class SharedLibraryLoader {
 	 * Extracts the source file and calls System.load. Attemps to extract and
 	 * load from multiple locations. Throws runtime exception if all fail.
 	 */
-	private void loadFile(String sourcePath) {
+	private File loadFile(String sourcePath) {
 		String sourceCrc = crc(readFile(sourcePath));
 
 		String fileName = new File(sourcePath).getName();
 
 		// Temp directory with username in path.
-		File file = new File(
-				System.getProperty("java.io.tmpdir") + "/natives-loader" + System.getProperty("user.name") + "/" + sourceCrc,
-				fileName);
+		File file = new File(System.getProperty("java.io.tmpdir") + "/natives-loader" + System.getProperty("user.name")
+				+ "/" + sourceCrc, fileName);
 		Throwable ex = loadFile(sourcePath, sourceCrc, file);
 		if (ex == null)
-			return;
+			return file;
 
 		// System provided temp directory.
 		try {
 			file = File.createTempFile(sourceCrc, null);
 			if (file.delete() && loadFile(sourcePath, sourceCrc, file) == null)
-				return;
+				return file;
 		} catch (Throwable ignored) {
 		}
 
 		// User home.
 		file = new File(System.getProperty("user.home") + "/.natives-loader/" + sourceCrc, fileName);
 		if (loadFile(sourcePath, sourceCrc, file) == null)
-			return;
+			return file;
 
 		// Relative directory.
 		file = new File(".temp/" + sourceCrc, fileName);
 		if (loadFile(sourcePath, sourceCrc, file) == null)
-			return;
+			return file;
 
 		// Fallback to java.library.path location, eg for applets.
 		file = new File(System.getProperty("java.library.path"), sourcePath);
 		if (file.exists()) {
 			System.load(file.getAbsolutePath());
-			return;
+			return file;
 		}
 
 		throw new RuntimeException(ex);
@@ -393,11 +414,11 @@ public class SharedLibraryLoader {
 	 * Sets the library as loaded, for when application code wants to handle
 	 * libary loading itself.
 	 */
-	static public synchronized void setLoaded(String libraryName) {
-		LOADED_LIBRARIES.add(libraryName);
+	static private void setLoaded(String libraryName, File file) {
+		LOADED_LIBRARIES.put(libraryName, file);
 	}
 
-	static public synchronized boolean isLoaded(String libraryName) {
-		return LOADED_LIBRARIES.contains(libraryName);
+	static public boolean isLoaded(String libraryName) {
+		return LOADED_LIBRARIES.containsKey(libraryName);
 	}
 }

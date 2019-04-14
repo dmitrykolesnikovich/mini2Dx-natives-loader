@@ -1,2 +1,5 @@
+[1.1.0]
+- Load functions now return library File reference
+
 [1.0.0]
 - Initial release
